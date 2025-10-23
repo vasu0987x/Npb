@@ -300,7 +300,8 @@ def stats():
     return Response(f"Active Users: {user_count}", status=200)
 
 def run_flask():
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.getenv("PORT", 5000))  # Render देगा PORT=10000 जैसा नंबर
+    app.run(host="0.0.0.0", port=port)
 
 # ---------------- TELEGRAM SENDER (PARALLEL) ----------------
 def _send_single(chat_id, payload):
@@ -1133,4 +1134,5 @@ if __name__ == "__main__":
     
     # Keep main thread alive
     while True:
+
         time.sleep(60)
