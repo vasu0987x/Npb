@@ -48,10 +48,10 @@ XHR_URL = "http://51.89.99.105/NumberPanel/agent/res/data_smscdr.php?fdate1=2025
 
 OTP_GROUP_IDS = ["-1002129550700"]
 
-CHANNEL_LINK = "https://t.me/VASUHUB"
+CHANNEL_LINK = "https://whatsapp.com/channel/0029Va5XJaU6xCSHlSwIXH1P"
 BACKUP = "https://t.me/DDXOTP"
 DEVELOPER_ID = "@DDXOTPBOT"
-CODE_GROUP = "https://t.me/+56r7hXvjZDE3N2M1"
+CODE_GROUP = "https://t.me/+9oYo5yC5HwYzZGI9"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
@@ -1136,4 +1136,5 @@ if __name__ == "__main__":
     while True:
 
         time.sleep(60)
+
 
