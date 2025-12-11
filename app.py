@@ -318,34 +318,57 @@ def otp_scraper_thread():
             )
 
             if response.status_code != 200:
+                print(f"❌ API returned status {response.status_code}", flush=True)
                 time.sleep(1)
                 continue
 
             data = response.json()
 
-            # Your API always returns list of lists
+            # API returns list directly
             if not isinstance(data, list):
-                print("❌ Unexpected API format!")
+                print(f"❌ Unexpected API format: {type(data)}", flush=True)
                 time.sleep(1)
                 continue
 
+            if not data:
+                # No new messages - this is normal, don't spam logs
+                time.sleep(1)
+                continue
+
+            print(f"📥 Got {len(data)} records from API", flush=True)
+
             for row in data:
                 try:
-                    sender = row[0]               # WhatsApp
-                    number = str(row[1])          # 2347020xxxxx
-                    message = row[2]              # OTP text
-                    timestamp = row[3]            # 2025-12-11 12:27:02
+                    # Validate row structure
+                    if not isinstance(row, list) or len(row) < 4:
+                        print(f"⚠️ Invalid row format: {row}", flush=True)
+                        continue
+
+                    sender = str(row[0])          # WhatsApp
+                    number = str(row[1])          # 2347020396755
+                    message = str(row[2])         # OTP text
+                    timestamp = str(row[3])       # 2025-12-11 12:47:23
+
+                    # Clean number (remove leading 0 or +)
+                    number = number.lstrip("0").lstrip("+")
 
                     # Unique message id
                     msg_id = f"{timestamp}_{number}_{message[:50]}"
 
                     if is_message_seen(msg_id):
+                        # Already processed this message
                         continue
+
+                    print(f"🆕 NEW MESSAGE - Number: {number} | Sender: {sender} | Time: {timestamp}", flush=True)
 
                     # Detect OTP
                     otp = extract_otp(message)
+                    if otp:
+                        print(f"🔑 OTP FOUND: {otp}", flush=True)
+                    else:
+                        print(f"⚠️ No OTP extracted from message", flush=True)
 
-                    # Save OTP history
+                    # Save OTP history in database
                     cache_past_otp(number, sender, message, otp, timestamp)
 
                     # Convert row → dict for existing handlers
@@ -359,9 +382,9 @@ def otp_scraper_thread():
                     # Send to GROUP queue
                     try:
                         group_queue.put_nowait((record, time.time()))
-                        print(f"📤 Queued for group: {number}", flush=True)
+                        print(f"📤 GROUP QUEUE: Added message for {number}", flush=True)
                     except:
-                        print("⚠️ Group queue full!", flush=True)
+                        print("⚠️ Group queue full! Skipping...", flush=True)
 
                     # Send to PERSONAL queue if user has this number
                     chat_id = get_chat_by_number(number)
@@ -369,17 +392,29 @@ def otp_scraper_thread():
                     if chat_id:
                         try:
                             personal_queue.put_nowait((record, chat_id, time.time()))
-                            print(f"📤 Queued for user {chat_id}: {number}", flush=True)
+                            print(f"📤 PERSONAL QUEUE: Added for user {chat_id} (number: {number})", flush=True)
                         except:
                             print(f"⚠️ Personal queue full for {chat_id}!", flush=True)
+                    else:
+                        print(f"ℹ️ No user assigned to number {number}", flush=True)
 
                 except Exception as e:
-                    print(f"⚠️ Row parse error: {e}", flush=True)
+                    print(f"⚠️ Row parse error: {e} | Row: {row}", flush=True)
+                    import traceback
+                    traceback.print_exc()
 
-            time.sleep(0.3)
+            time.sleep(0.5)  # Poll every 500ms
 
+        except requests.Timeout:
+            print("❌ API timeout - retrying in 2s", flush=True)
+            time.sleep(2)
+        except requests.RequestException as e:
+            print(f"❌ Network error: {e} - retrying in 2s", flush=True)
+            time.sleep(2)
         except Exception as e:
             print(f"❌ Scraper error: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
             time.sleep(2)
 
 
