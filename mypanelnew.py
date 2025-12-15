@@ -31,7 +31,7 @@ API_TOKEN = os.getenv("API_TOKEN")
 BASE_URL = "http://51.77.216.195/crapi/mait"
 OTP_GROUP_ID = "-1002129550700"
 BACKUP = "https://t.me/Vasuhub"
-CHANNEL_LINK = "https://t.me/Nokosxbot"
+CHANNEL_LINK = "https://t.me/DDXOTPbot"
 
 # ==================== QUEUES ====================
 group_queue = Queue(maxsize=1000)
@@ -1022,3 +1022,4 @@ if __name__ == "__main__":
     # Start Flask server
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+
