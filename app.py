@@ -300,6 +300,7 @@ def format_personal_message(record):
     return formatted
 
 # ==================== THREAD 1: OTP SCRAPER ====================
+# ==================== THREAD 1: OTP SCRAPER (FIXED) ====================
 def otp_scraper_thread():
     """Continuously fetch OTPs and push to queues"""
     print("🟢 OTP Scraper Started", flush=True)
@@ -319,59 +320,83 @@ def otp_scraper_thread():
 
             if response.status_code != 200:
                 print(f"❌ API returned status {response.status_code}", flush=True)
-                time.sleep(1)
+                time.sleep(2)
                 continue
 
-            data = response.json()
+            # Try to parse JSON
+            try:
+                data = response.json()
+            except ValueError as e:
+                print(f"❌ JSON decode error: {e}", flush=True)
+                time.sleep(2)
+                continue
 
-            # API returns list directly
-            if not isinstance(data, list):
+            # Handle both list and dict responses
+            if isinstance(data, dict):
+                # API returned error or structured response
+                status = data.get("status", "unknown")
+                if status == "success":
+                    records = data.get("data", [])
+                    print(f"📥 API success: Got {len(records)} records", flush=True)
+                else:
+                    error_msg = data.get("message", "Unknown error")
+                    print(f"❌ API Error: {error_msg}", flush=True)
+                    time.sleep(2)
+                    continue
+            elif isinstance(data, list):
+                # API returned list directly (your current format)
+                records = data
+            else:
                 print(f"❌ Unexpected API format: {type(data)}", flush=True)
+                time.sleep(2)
+                continue
+
+            if not records:
+                # No new messages - this is normal
                 time.sleep(1)
                 continue
 
-            if not data:
-                # No new messages - this is normal, don't spam logs
-                time.sleep(1)
-                continue
+            print(f"📥 Processing {len(records)} records", flush=True)
 
-            print(f"📥 Got {len(data)} records from API", flush=True)
-
-            for row in data:
+            for row in records:
                 try:
-                    # Validate row structure
+                    # Validate row structure - should be list with 4 elements
                     if not isinstance(row, list) or len(row) < 4:
-                        print(f"⚠️ Invalid row format: {row}", flush=True)
+                        print(f"⚠️ Invalid row format (expected list with 4 items): {row}", flush=True)
                         continue
 
-                    sender = str(row[0])          # WhatsApp
-                    number = str(row[1])          # 2347020396755
-                    message = str(row[2])         # OTP text
-                    timestamp = str(row[3])       # 2025-12-11 12:47:23
+                    # Extract data from array
+                    sender = str(row[0]).strip()      # "WhatsApp", "Facebook", etc.
+                    number = str(row[1]).strip()      # "2347020396755"
+                    message = str(row[2]).strip()     # OTP message text
+                    timestamp = str(row[3]).strip()   # "2025-12-11 12:47:23"
+
+                    # Validate data
+                    if not sender or not number or not message:
+                        print(f"⚠️ Incomplete data in row: {row}", flush=True)
+                        continue
 
                     # Clean number (remove leading 0 or +)
                     number = number.lstrip("0").lstrip("+")
 
-                    # Unique message id
+                    # Create unique message ID
                     msg_id = f"{timestamp}_{number}_{message[:50]}"
 
+                    # Skip if already processed
                     if is_message_seen(msg_id):
-                        # Already processed this message
                         continue
 
                     print(f"🆕 NEW MESSAGE - Number: {number} | Sender: {sender} | Time: {timestamp}", flush=True)
 
-                    # Detect OTP
+                    # Extract OTP
                     otp = extract_otp(message)
                     if otp:
                         print(f"🔑 OTP FOUND: {otp}", flush=True)
-                    else:
-                        print(f"⚠️ No OTP extracted from message", flush=True)
 
-                    # Save OTP history in database
+                    # Cache for past OTP retrieval
                     cache_past_otp(number, sender, message, otp, timestamp)
 
-                    # Convert row → dict for existing handlers
+                    # Convert to dict for handlers
                     record = {
                         "cli": sender,
                         "num": number,
@@ -379,24 +404,21 @@ def otp_scraper_thread():
                         "dt": timestamp
                     }
 
-                    # Send to GROUP queue
+                    # Add to GROUP queue
                     try:
                         group_queue.put_nowait((record, time.time()))
                         print(f"📤 GROUP QUEUE: Added message for {number}", flush=True)
                     except:
                         print("⚠️ Group queue full! Skipping...", flush=True)
 
-                    # Send to PERSONAL queue if user has this number
+                    # Add to PERSONAL queue if user assigned
                     chat_id = get_chat_by_number(number)
-
                     if chat_id:
                         try:
                             personal_queue.put_nowait((record, chat_id, time.time()))
-                            print(f"📤 PERSONAL QUEUE: Added for user {chat_id} (number: {number})", flush=True)
+                            print(f"📤 PERSONAL QUEUE: Added for user {chat_id}", flush=True)
                         except:
                             print(f"⚠️ Personal queue full for {chat_id}!", flush=True)
-                    else:
-                        print(f"ℹ️ No user assigned to number {number}", flush=True)
 
                 except Exception as e:
                     print(f"⚠️ Row parse error: {e} | Row: {row}", flush=True)
