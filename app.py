@@ -301,10 +301,16 @@ def format_personal_message(record):
 
 # ==================== THREAD 1: OTP SCRAPER ====================
 # ==================== THREAD 1: OTP SCRAPER (FIXED) ====================
+# ==================== THREAD 1: OTP SCRAPER WITH RATE LIMITING ====================
 def otp_scraper_thread():
-    """Continuously fetch OTPs and push to queues"""
+    """Continuously fetch OTPs with intelligent rate limiting"""
     print("🟢 OTP Scraper Started", flush=True)
-
+    
+    consecutive_errors = 0
+    base_delay = 2  # Start with 2 seconds between requests
+    max_delay = 30  # Max 30 seconds
+    success_delay = 2  # Delay after successful request
+    
     while True:
         try:
             response = requests.get(
@@ -318,85 +324,98 @@ def otp_scraper_thread():
                 timeout=8
             )
 
-            if response.status_code != 200:
+            # Handle different status codes
+            if response.status_code == 403:
+                consecutive_errors += 1
+                # Exponential backoff for 403 errors
+                backoff_delay = min(base_delay * (2 ** consecutive_errors), max_delay)
+                print(f"❌ API 403 Forbidden (Rate Limited) - Backing off for {backoff_delay}s (error #{consecutive_errors})", flush=True)
+                time.sleep(backoff_delay)
+                continue
+                
+            elif response.status_code == 429:
+                # Too Many Requests
+                retry_after = int(response.headers.get('Retry-After', 30))
+                print(f"❌ API 429 Too Many Requests - Waiting {retry_after}s", flush=True)
+                time.sleep(retry_after)
+                continue
+                
+            elif response.status_code != 200:
                 print(f"❌ API returned status {response.status_code}", flush=True)
-                time.sleep(2)
+                time.sleep(5)
                 continue
 
             # Try to parse JSON
             try:
                 data = response.json()
             except ValueError as e:
-                print(f"❌ JSON decode error: {e}", flush=True)
-                time.sleep(2)
+                consecutive_errors += 1
+                print(f"❌ Empty/Invalid JSON response (likely rate limited) - Error #{consecutive_errors}", flush=True)
+                backoff_delay = min(base_delay * (2 ** consecutive_errors), max_delay)
+                time.sleep(backoff_delay)
                 continue
+
+            # Reset error counter on successful request
+            consecutive_errors = 0
 
             # Handle both list and dict responses
             if isinstance(data, dict):
-                # API returned error or structured response
                 status = data.get("status", "unknown")
                 if status == "success":
                     records = data.get("data", [])
-                    print(f"📥 API success: Got {len(records)} records", flush=True)
                 else:
                     error_msg = data.get("message", "Unknown error")
                     print(f"❌ API Error: {error_msg}", flush=True)
-                    time.sleep(2)
+                    time.sleep(5)
                     continue
             elif isinstance(data, list):
-                # API returned list directly (your current format)
                 records = data
             else:
                 print(f"❌ Unexpected API format: {type(data)}", flush=True)
-                time.sleep(2)
+                time.sleep(5)
                 continue
 
             if not records:
-                # No new messages - this is normal
-                time.sleep(1)
+                # No new messages - wait longer
+                time.sleep(success_delay)
                 continue
 
             print(f"📥 Processing {len(records)} records", flush=True)
 
             for row in records:
                 try:
-                    # Validate row structure - should be list with 4 elements
                     if not isinstance(row, list) or len(row) < 4:
-                        print(f"⚠️ Invalid row format (expected list with 4 items): {row}", flush=True)
+                        print(f"⚠️ Invalid row format: {row}", flush=True)
                         continue
 
-                    # Extract data from array
-                    sender = str(row[0]).strip()      # "WhatsApp", "Facebook", etc.
-                    number = str(row[1]).strip()      # "2347020396755"
-                    message = str(row[2]).strip()     # OTP message text
-                    timestamp = str(row[3]).strip()   # "2025-12-11 12:47:23"
+                    sender = str(row[0]).strip()
+                    number = str(row[1]).strip()
+                    message = str(row[2]).strip()
+                    timestamp = str(row[3]).strip()
 
-                    # Validate data
                     if not sender or not number or not message:
-                        print(f"⚠️ Incomplete data in row: {row}", flush=True)
                         continue
 
-                    # Clean number (remove leading 0 or +)
+                    # Clean number
                     number = number.lstrip("0").lstrip("+")
 
-                    # Create unique message ID
+                    # Unique message ID
                     msg_id = f"{timestamp}_{number}_{message[:50]}"
 
-                    # Skip if already processed
                     if is_message_seen(msg_id):
                         continue
 
-                    print(f"🆕 NEW MESSAGE - Number: {number} | Sender: {sender} | Time: {timestamp}", flush=True)
+                    print(f"🆕 NEW - {sender} | {number} | {timestamp}", flush=True)
 
                     # Extract OTP
                     otp = extract_otp(message)
                     if otp:
-                        print(f"🔑 OTP FOUND: {otp}", flush=True)
+                        print(f"🔑 OTP: {otp}", flush=True)
 
-                    # Cache for past OTP retrieval
+                    # Cache
                     cache_past_otp(number, sender, message, otp, timestamp)
 
-                    # Convert to dict for handlers
+                    # Create record
                     record = {
                         "cli": sender,
                         "num": number,
@@ -404,40 +423,41 @@ def otp_scraper_thread():
                         "dt": timestamp
                     }
 
-                    # Add to GROUP queue
+                    # Queue for group
                     try:
                         group_queue.put_nowait((record, time.time()))
-                        print(f"📤 GROUP QUEUE: Added message for {number}", flush=True)
                     except:
-                        print("⚠️ Group queue full! Skipping...", flush=True)
+                        print("⚠️ Group queue full", flush=True)
 
-                    # Add to PERSONAL queue if user assigned
+                    # Queue for personal
                     chat_id = get_chat_by_number(number)
                     if chat_id:
                         try:
                             personal_queue.put_nowait((record, chat_id, time.time()))
-                            print(f"📤 PERSONAL QUEUE: Added for user {chat_id}", flush=True)
                         except:
-                            print(f"⚠️ Personal queue full for {chat_id}!", flush=True)
+                            print(f"⚠️ Personal queue full", flush=True)
 
                 except Exception as e:
-                    print(f"⚠️ Row parse error: {e} | Row: {row}", flush=True)
-                    import traceback
-                    traceback.print_exc()
+                    print(f"⚠️ Row error: {e}", flush=True)
 
-            time.sleep(0.5)  # Poll every 500ms
+            # Successful request - use normal delay
+            time.sleep(success_delay)
 
         except requests.Timeout:
-            print("❌ API timeout - retrying in 2s", flush=True)
-            time.sleep(2)
+            consecutive_errors += 1
+            print(f"❌ Timeout - Error #{consecutive_errors}", flush=True)
+            time.sleep(min(5 * consecutive_errors, max_delay))
+            
         except requests.RequestException as e:
-            print(f"❌ Network error: {e} - retrying in 2s", flush=True)
-            time.sleep(2)
+            consecutive_errors += 1
+            print(f"❌ Network error: {e} - Error #{consecutive_errors}", flush=True)
+            time.sleep(min(5 * consecutive_errors, max_delay))
+            
         except Exception as e:
             print(f"❌ Scraper error: {e}", flush=True)
             import traceback
             traceback.print_exc()
-            time.sleep(2)
+            time.sleep(10)
 
 
 # ==================== THREAD 2: GROUP SENDER ====================
