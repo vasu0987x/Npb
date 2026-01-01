@@ -1,1 +1,1 @@
-web: python mypanelnew.py
+web: python app.py
