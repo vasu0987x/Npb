@@ -87,7 +87,7 @@ temp_uploads = {}
 last_change_time = {}
 active_users = set()
 past_otp_fetch_cooldown = {}
-REQUIRED_CHANNELS = ["@Vasuhub", "@DDxOTP", "@NokosxOTP", "@DDXBACKUP"]
+REQUIRED_CHANNELS = ["@Vasuhub", "@DDxOTP", "@nokosxotps", "@DDXBACKUP"]
 
 # Service name mappings
 SERVICE_CODES = {
