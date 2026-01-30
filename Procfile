@@ -1,1 +1,1 @@
-web: python mnew.py
+web: python nmainmain.py
