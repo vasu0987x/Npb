@@ -1,1 +1,1 @@
-web: python nmainmain.py
+web: python maitpremium.py
