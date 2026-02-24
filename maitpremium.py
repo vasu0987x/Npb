@@ -29,7 +29,7 @@ os.makedirs(NUMBERS_DIR, exist_ok=True)
 # API Config
 API_TOKEN = os.getenv("API_TOKEN")
 BASE_URL = "http://51.77.216.195/crapi/mait"
-OTP_GROUP_IDS = ["-1003808255244"]
+OTP_GROUP_IDS = ["-1003633481131"]
 AUTO_DELETE_MINUTES = 0  # 0 means disabled
 BACKUP = "https://t.me/Vasuhub"
 CHANNEL_LINK = "https://t.me/DDXOTPbot"
@@ -443,43 +443,64 @@ def otp_scraper_thread():
                 timeout=8
             )
             
-            if response.status_code == 200:
+            # Empty response check
+            if not response.text.strip():
+                print("⚠️ API returned empty response - token invalid ya server down", flush=True)
+                time.sleep(5)
+                continue
+            
+            try:
                 stats = response.json()
-                
-                if stats.get("status") == "success":
-                    for record in stats["data"]:
-                        msg_id = f"{record.get('dt')}_{record.get('num')}_{record.get('message')[:50]}"
-                        
-                        if is_message_seen(msg_id):
-                            continue
-                        
-                        number = str(record.get("num", "")).lstrip("0").lstrip("+")
-                        sender = record.get("cli", "Unknown")
-                        message = record.get("message", "")
-                        timestamp = record.get("dt", "")
-                        otp = extract_otp(message)
-                        
-                        cache_past_otp(number, sender, message, otp, timestamp)
-                        
+            except Exception:
+                print(f"⚠️ API non-JSON response: {response.text[:100]}", flush=True)
+                time.sleep(5)
+                continue
+            
+            if stats.get("status") == "error":
+                print(f"⚠️ API error: {stats.get('msg', 'Unknown')}", flush=True)
+                time.sleep(10)
+                continue
+            
+            if stats.get("status") == "success":
+                for record in stats["data"]:
+                    msg_id = f"{record.get('dt')}_{record.get('num')}_{record.get('message', '')[:50]}"
+                    
+                    if is_message_seen(msg_id):
+                        continue
+                    
+                    number = str(record.get("num", "")).lstrip("0").lstrip("+")
+                    sender = record.get("cli", "Unknown")
+                    message = record.get("message", "")
+                    timestamp = record.get("dt", "")
+                    otp = extract_otp(message)
+                    
+                    cache_past_otp(number, sender, message, otp, timestamp)
+                    
+                    try:
+                        group_queue.put_nowait((record, time.time()))
+                        print(f"📤 Queued: {number} | {sender} | OTP: {otp or 'N/A'}", flush=True)
+                    except:
+                        print("⚠️ Group queue full!", flush=True)
+                    
+                    chat_id = get_chat_by_number(number)
+                    if chat_id:
                         try:
-                            group_queue.put_nowait((record, time.time()))
-                            print(f"📤 Queued for group: {number}", flush=True)
+                            personal_queue.put_nowait((record, chat_id, time.time()))
                         except:
-                            print("⚠️ Group queue full!", flush=True)
-                        
-                        chat_id = get_chat_by_number(number)
-                        if chat_id:
-                            try:
-                                personal_queue.put_nowait((record, chat_id, time.time()))
-                                print(f"📤 Queued for user {chat_id}: {number}", flush=True)
-                            except:
-                                print(f"⚠️ Personal queue full for {chat_id}!", flush=True)
+                            print(f"⚠️ Personal queue full for {chat_id}!", flush=True)
             
             time.sleep(3)
             
+        except requests.exceptions.Timeout:
+            print("⚠️ API timeout - retrying...", flush=True)
+            time.sleep(3)
+        except requests.exceptions.ConnectionError:
+            print("⚠️ API connection error - retrying...", flush=True)
+            time.sleep(5)
         except Exception as e:
             print(f"❌ Scraper error: {e}", flush=True)
             time.sleep(2)
+
 
 # ==================== THREAD 2: GROUP SENDER ====================
 def group_sender_thread():
