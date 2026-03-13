@@ -29,7 +29,7 @@ PASSWORD = os.getenv("PASSWORD", "Coldflyteam")
 # ╚══════════════════════════════════════════════════════════════╝
 TELEGRAM_BOT_TOKEN = os.getenv("BOT_TOKEN", "Coldflyteam")
 TELEGRAM_CHAT_ID   = "-1003702001619"
-ADMIN_USER_IDS     = [8205703514, 987654321]   # ← Apne Telegram User IDs dalo
+ADMIN_USER_IDS     = [7658557284]   # ← Apne Telegram User IDs dalo
 
 # ╔══════════════════════════════════════════════════════════════╗
 # ║                   INLINE BUTTON LINKS                        ║
