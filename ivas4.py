@@ -953,10 +953,12 @@ def _admin_cb_clearseen(chat_id, message_id, user_id):
     with SMS_LOCK:
         old_count = len(SEEN_SMS)
         SEEN_SMS.clear()
+    with _NUMBER_INIT_LOCK:
+        _NUMBER_INITIALIZED.clear()
     msg = (
         "🗑️ <b>SMS Cache Cleared!</b>\n\n"
         f"✅ Removed <b>{old_count}</b> seen messages\n"
-        "🔄 Bot will now process all SMS again"
+        "🔄 Next poll will apply 10-SMS startup limit"
     )
     edit_telegram_message(chat_id, message_id, msg, {"inline_keyboard": [_back_btn()]})
 
@@ -1159,7 +1161,9 @@ def handle_clearseen_command(chat_id, user_id):
     with SMS_LOCK:
         old_count = len(SEEN_SMS)
         SEEN_SMS.clear()
-    send_telegram_message(chat_id, f"🗑️ <b>Cleared {old_count} messages from cache</b>")
+    with _NUMBER_INIT_LOCK:
+        _NUMBER_INITIALIZED.clear()
+    send_telegram_message(chat_id, f"🗑️ <b>Cleared {old_count} messages from cache</b>\n⚡ Next poll will apply 10-SMS startup limit again.")
 
 def handle_autodelete_command(chat_id, user_id, message_text):
     global AUTO_DELETE_MINUTES
@@ -1350,10 +1354,38 @@ def get_sms(csrf, number, range_name, session):
 # ╔══════════════════════════════════════════════════════════════╗
 # ║          PROCESS A SINGLE NUMBER → enqueue OTPs             ║
 # ╚══════════════════════════════════════════════════════════════╝
+# Tracks which numbers have been "initialized" (first poll done)
+# On first poll per number: only last 10 SMS are sent, rest marked seen silently
+_NUMBER_INITIALIZED = set()
+_NUMBER_INIT_LOCK   = threading.Lock()
+STARTUP_SMS_LIMIT   = 10   # Max old SMS to send per number on first poll
+
 def process_number(csrf, num, rname, session):
-    """Fetch SMS for one number and push OTPs to MESSAGE_QUEUE."""
+    """Fetch SMS for one number and push OTPs to MESSAGE_QUEUE.
+    On first poll: silently mark all-but-last-10 as seen (skip old flood).
+    On subsequent polls: send everything new instantly.
+    """
     try:
         sms_list = get_sms(csrf, num, rname, session)
+        if not sms_list:
+            return
+
+        with _NUMBER_INIT_LOCK:
+            is_first_poll = num not in _NUMBER_INITIALIZED
+            if is_first_poll:
+                _NUMBER_INITIALIZED.add(num)
+
+        if is_first_poll and len(sms_list) > STARTUP_SMS_LIMIT:
+            # Mark old messages as seen without sending them
+            old_msgs = sms_list[:-STARTUP_SMS_LIMIT]   # everything except last 10
+            new_msgs = sms_list[-STARTUP_SMS_LIMIT:]    # only last 10 to send
+            with SMS_LOCK:
+                for sender, sms in old_msgs:
+                    h = sms_hash(rname, num, sms)
+                    SEEN_SMS.add(h)   # silently mark as seen, no message sent
+            print(f"⏭️ Skipped {len(old_msgs)} old SMS for {num} (startup limit)")
+            sms_list = new_msgs
+
         for sender, sms in sms_list:
             with SMS_LOCK:
                 h = sms_hash(rname, num, sms)
