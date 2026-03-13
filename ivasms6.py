@@ -1477,12 +1477,15 @@ def command_worker():
 
 def otp_worker(worker_id=0):
     """
-    SIMPLE & FAST:
-    - Numbers NUMBERS_CACHE se aate hain (jo /fresh se save hota hai numbers_cache.txt mein)
-    - Koi scanning nahi, koi range fetch nahi — bas seedha SMS fetch karo
-    - Har cycle: sab numbers parallel mein SMS check, naya mila toh queue mein daalo
+    SIMPLE FLOW — every 1 sec:
+      1. getsms  → which ranges have SMS today
+      2. get_numbers_from_range (parallel) → which numbers in those ranges
+      3. get_sms (parallel) → fetch only those active numbers
+      4. new SMS? check assignment → send DM + GC or GC only
+    No 1000-number scanning. Portal only hit for active numbers.
+    Startup: send max 2 old SMS to GC so we know bot is alive, rest skipped.
     """
-    print(f"📱 OTP Worker Started")
+    print("📱 OTP Worker Started")
     session = create_session()
     csrf    = None
 
@@ -1491,28 +1494,28 @@ def otp_worker(worker_id=0):
             print(f"🔑 Login attempt {attempt}/3...")
             csrf = login(session)
             csrf = get_csrf_for_sms(session)
-            print(f"✅ OTP Worker logged in")
+            print("✅ OTP Worker logged in")
             break
         except Exception as e:
             print(f"❌ Login failed ({attempt}): {e}")
             if attempt < 3:
                 time.sleep(5)
             else:
-                print(f"❌ Max attempts reached. OTP Worker stopping.")
+                print("❌ Max attempts reached. Stopping.")
                 return
 
-    csrf_counter = 0
-    iteration    = 0
-    in_flight    = []
+    csrf_counter      = 0
+    iteration         = 0
+    startup_sent      = 0          # how many old SMS sent to GC on startup
+    STARTUP_GC_LIMIT  = 2          # max old SMS to GC on first boot
 
     while BOT_RUNNING:
         try:
             iteration += 1
-            if iteration % 50 == 0:
-                print(f"💓 OTP Worker heartbeat — iter {iteration}, "
-                      f"in-flight: {len(in_flight)}")
+            if iteration % 60 == 0:
+                print(f"💓 OTP Worker alive — iter {iteration}")
 
-            # ── CSRF refresh ──────────────────────────────────────
+            # ── CSRF refresh every 100 cycles ─────────────────────
             if csrf_counter >= CSRF_REFRESH_EVERY:
                 try:
                     csrf = get_csrf_for_sms(session)
@@ -1528,41 +1531,98 @@ def otp_worker(worker_id=0):
                         continue
             csrf_counter += 1
 
-            # ── Get all numbers from local cache (no HTTP call needed) ──
-            with CACHE_LOCK:
-                all_numbers = [
-                    (num_data["number"], num_data["range"])
-                    for nums in NUMBERS_CACHE.values()
-                    for num_data in nums
-                ]
-
-            if not all_numbers:
-                print("⚠️ No numbers in cache. Run /fresh to load numbers.")
-                time.sleep(5)
+            # ── Step 1: ranges with SMS today (1 HTTP call) ───────
+            try:
+                html_text = trigger_getsms(csrf, session)
+                ranges    = parse_ranges(html_text)
+            except Exception as e:
+                print(f"⚠️ getsms error: {e}")
+                time.sleep(OTP_POLL_INTERVAL)
                 continue
 
-            # ── Clean up finished futures ─────────────────────────
-            in_flight = [f for f in in_flight if not f.done()]
-
-            # ── Throttle if pool overloaded ───────────────────────
-            if len(in_flight) >= NUM_SMS_THREADS * 2:
-                time.sleep(0.2)
+            if not ranges:
+                time.sleep(OTP_POLL_INTERVAL)
                 continue
 
-            # ── Priority: assigned-user numbers first ─────────────
+            # ── Step 2: numbers in those ranges (parallel) ────────
+            active_pairs = []   # [(num, rname), ...]
+            lock = threading.Lock()
+
+            def _fetch_range(rname):
+                try:
+                    nums = get_numbers_from_range(csrf, rname, session)
+                    with lock:
+                        for n in nums:
+                            active_pairs.append((n, rname))
+                except Exception as e:
+                    print(f"⚠️ Range error {rname}: {e}")
+
+            rfuts = [SMS_EXECUTOR.submit(_fetch_range, r) for r in ranges]
+            for f in rfuts:
+                try: f.result(timeout=HTTP_TIMEOUT)
+                except Exception: pass
+
+            if not active_pairs:
+                time.sleep(OTP_POLL_INTERVAL)
+                continue
+
+            # ── Step 3: fetch SMS for active numbers (parallel) ───
             user_db          = load_user_db()
-            assigned_numbers = {str(v["number"]) for v in user_db.values()}
+            assigned_numbers = {str(v["number"]): int(uid) for uid, v in user_db.items()}
 
-            priority = [(n, r) for n, r in all_numbers if n in assigned_numbers]
-            secondary = [(n, r) for n, r in all_numbers if n not in assigned_numbers]
+            def _fetch_sms(num, rname):
+                try:
+                    sms_list = get_sms(csrf, num, rname, session)
+                    if not sms_list:
+                        return
 
-            for num, rname in priority:
-                f = SMS_EXECUTOR.submit(process_number, csrf, num, rname, session)
-                in_flight.append(f)
+                    with _NUMBER_INIT_LOCK:
+                        is_first = num not in _NUMBER_INITIALIZED
+                        if is_first:
+                            _NUMBER_INITIALIZED.add(num)
 
-            for num, rname in secondary:
-                f = SMS_EXECUTOR.submit(process_number, csrf, num, rname, session)
-                in_flight.append(f)
+                    for sender, sms in sms_list:
+                        with SMS_LOCK:
+                            h = sms_hash(rname, num, sms)
+                            if h in SEEN_SMS:
+                                continue
+                            SEEN_SMS.add(h)
+                            SMS_TEXT_CACHE[h] = sms
+
+                        otp = extract_otp(sms)
+                        if not otp:
+                            continue
+
+                        country = extract_country_name(rname)
+                        flag    = get_country_flag(country)
+
+                        # ── Startup old SMS limit ──────────────────
+                        nonlocal startup_sent
+                        if is_first:
+                            if startup_sent >= STARTUP_GC_LIMIT:
+                                continue   # skip rest of old SMS silently
+                            startup_sent += 1
+                            print(f"📨 Startup SMS {startup_sent}/{STARTUP_GC_LIMIT} | {flag} {country} | {num}")
+                        else:
+                            print(f"🆕 NEW OTP | {flag} {country} | {num} | {sender or '?'} | {otp}")
+
+                        # ── Send to GC always ──────────────────────
+                        msg_gc = format_otp_message_group(rname, num, sms, otp, sender)
+                        MESSAGE_QUEUE.put(("group", TELEGRAM_CHAT_ID, msg_gc, otp, h))
+
+                        # ── Send DM only if assigned ───────────────
+                        assigned_uid = assigned_numbers.get(str(num))
+                        if assigned_uid:
+                            msg_dm = format_otp_message_personal(rname, num, sms, otp, sender)
+                            MESSAGE_QUEUE.put(("user", assigned_uid, msg_dm, otp, h))
+
+                except Exception as e:
+                    print(f"⚠️ SMS fetch error {num}: {e}")
+
+            sfuts = [SMS_EXECUTOR.submit(_fetch_sms, num, rname) for num, rname in active_pairs]
+            for f in sfuts:
+                try: f.result(timeout=HTTP_TIMEOUT)
+                except Exception: pass
 
             time.sleep(OTP_POLL_INTERVAL)
 
