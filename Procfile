@@ -1,1 +1,1 @@
-web: python maitpremium.py
+web: python ivasm.py
