@@ -1,1 +1,1 @@
-web: python ivasm.py
+web: python iva2.py
