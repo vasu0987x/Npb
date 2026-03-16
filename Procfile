@@ -1,1 +1,1 @@
-web: python ivasms6.py
+web: python ivas7.py
