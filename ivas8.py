@@ -32,7 +32,7 @@ PASSWORD = os.getenv("PASSWORD", "Coldflyteam")
 # ╚══════════════════════════════════════════════════════════════╝
 TELEGRAM_BOT_TOKEN = os.getenv("BOT_TOKEN", "token")
 TELEGRAM_CHAT_ID   = "-1003633481131"
-ADMIN_USER_IDS     = [7658557284]
+ADMIN_USER_IDS     = [8195360535]
 
 # ╔══════════════════════════════════════════════════════════════╗
 # ║                   INLINE BUTTON LINKS                        ║
