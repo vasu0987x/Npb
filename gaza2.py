@@ -105,7 +105,7 @@ group_queue    = Queue(maxsize=1000)
 personal_queue = Queue(maxsize=5000)
 seen_messages  = deque(maxlen=50000)   # dedup by msg_id string
 
-OTP_GROUP_IDS       = ["-1003749252061"]
+OTP_GROUP_IDS       = ["-1003702001619"]
 AUTO_DELETE_MINUTES = 0
 BACKUP       = "https://t.me/uxotp"
 CHANNEL_LINK = "https://t.me/uxotpbot"
@@ -167,12 +167,12 @@ def load_data():
             data = json.load(f)
         numbers_by_country  = data.get("numbers_by_country", {})
         current_country     = data.get("current_country")
-        OTP_GROUP_IDS       = data.get("otp_groups", ["-1003749252061"])
+        OTP_GROUP_IDS       = data.get("otp_groups", ["-1003702001619"])
         AUTO_DELETE_MINUTES = data.get("auto_delete_minutes", 0)
         flag_overrides      = data.get("flag_overrides", {})
     else:
         data = {"numbers_by_country": {}, "current_country": None,
-                "otp_groups": ["-1003749252061"], "auto_delete_minutes": 0, "flag_overrides": {}}
+                "otp_groups": ["-1003702001619"], "auto_delete_minutes": 0, "flag_overrides": {}}
         numbers_by_country = {}; current_country = None
 
 def save_data():
