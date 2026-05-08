@@ -107,8 +107,8 @@ seen_messages  = deque(maxlen=50000)   # dedup by msg_id string
 
 OTP_GROUP_IDS       = ["-1003702001619"]
 AUTO_DELETE_MINUTES = 0
-BACKUP       = "https://t.me/uxotp"
-CHANNEL_LINK = "https://t.me/uxotpbot"
+BACKUP       = "https://t.me/ddxotp"
+CHANNEL_LINK = "https://t.me/ddxotpbot"
 
 # ==================== REGEX PATTERNS ====================
 KEYWORD_REGEX = re.compile(r"(otp|code|codigo|pin|password|verify)[^\d]{0,10}(\d[\d\-\s]{2,8}\d)", re.I)
