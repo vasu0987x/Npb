@@ -370,8 +370,7 @@ def format_group_message(record):
         "inline_keyboard": [
             *([[{"text": f"🔑 {otp}", "callback_data": f"copy_{otp}",
                  "icon_custom_emoji_id": "5443038326535759644"}]] if otp else []),
-            [{"text": " View Full SMS", "callback_data": f"fullsms_{msg_hash}",
-              "icon_custom_emoji_id": "5253742260054409879"}],
+          
             [
                 {"text": " Panel",   "url": CHANNEL_LINK,
                  "icon_custom_emoji_id": "5330237710655306682"},
@@ -523,8 +522,7 @@ def _direct_send_to_group(record, old=False):
         "inline_keyboard": [
             *([[{"text": f" {otp}", "callback_data": f"copy_{otp}",
                  "icon_custom_emoji_id": "5443038326535759644"}]] if otp else []),
-            [{"text": " View Full SMS", "callback_data": f"fullsms_{msg_hash}",
-              "icon_custom_emoji_id": "5253742260054409879"}],
+           
             [
                 {"text": " Panel",   "url": CHANNEL_LINK,
                  "icon_custom_emoji_id": "5330237710655306682"},
