@@ -1,1 +1,1 @@
-web: python ivas8.py
+web: python gaza.py
