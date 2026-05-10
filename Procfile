@@ -1,1 +1,1 @@
-web: python gaza2.py
+web: python nmainmain.py
