@@ -1,1 +1,1 @@
-web: python nmainmain.py
+web: python zento.py
