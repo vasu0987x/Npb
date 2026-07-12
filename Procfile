@@ -1,1 +1,1 @@
-web: python zento.py
+web: python ps.py
