@@ -1,1 +1,1 @@
-web: python ps.py
+web: python third.py
